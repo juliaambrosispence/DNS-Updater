@@ -1,11 +1,39 @@
-# DNS Updater Script
+# Filename: dnsupdate.py
+# Desc: A DNS Updater Script for Dynamic IPs
+# Date: May 29th 2025
 # by Julia Spence
-# May 29th 2025
 
 from dotenv import load_dotenv
 import os
 from cloudflare import Cloudflare
 import requests
+
+def find_ip():
+    """Retrieve public IP address from http request"""
+    # Get our public IP
+    ip_response = requests.get("https://ipinfo.io/ip")
+    if ip_response.status_code == 200:
+        print("Public IP address:", ip_response.text)
+    else:
+        exit("Public IP address not found.")
+    return ip_response.text
+
+def retrieve_record():
+    """Create cloudflare client and dns record objects for API calls"""
+    # Create cloudflare client object
+    client = Cloudflare(
+        api_email = os.getenv("CLOUDFLARE_EMAIL"),
+        api_key = os.environ.get("CLOUDFLARE_API_KEY")
+    )
+
+    # Retrieve dns records
+    try:
+        dns_record = client.dns.records.list(
+            zone_id = os.environ.get("DNS_ZONE_ID")
+        )
+    except ValueError:
+        exit("DNS record not found.")
+    return client, dns_record
 
 def main():
     print("DNS Updater Script ===")
@@ -14,34 +42,17 @@ def main():
     load_dotenv()
 
     # Get our public IP
-    ip_response = requests.get("https://ipinfo.io/ip")
-    if ip_response.status_code == 200:
-        print("Public IP address:", ip_response.text)
-    else:
-        exit("Public IP address not found.")
-    ip_new = ip_response.text
+    ip_new = find_ip()
 
-    # Create cloudflare client object
-    client = Cloudflare(
-        api_email=os.getenv("CLOUDFLARE_EMAIL"),
-        api_key=os.environ.get("CLOUDFLARE_API_KEY")
-    )
+    cloudflare_client, cloudflare_dns_record = retrieve_record()
 
-    # Retrieve dns records
-    try:
-        dns_record = client.dns.records.list(
-            zone_id=os.environ.get("DNS_ZONE_ID")
-        )
-    except ValueError:
-        exit("DNS record not found.")
-
-    print("DNS Records Retrieved:")
 
     # Now go through each record and see if it needs updating, if so add
     # its id to a list
     mismatched = []
     old_ip = ""
-    for record in dns_record:
+    print("DNS Records Retrieved:")
+    for record in cloudflare_dns_record:
         # Print entry
         print(f"{type(record).__name__}\t{record.name}:\n\t id={record.id},\n\t content={record.content}")
 
@@ -72,7 +83,7 @@ def main():
             new_cont = record.content.replace(old_ip, ip_new)
             # Replace the record with new content
             try:
-                edit_response = client.dns.records.edit(
+                cloudflare_client.dns.records.edit(
                     dns_record_id=record.id,
                     zone_id=os.environ.get("DNS_ZONE_ID"),
                     content=new_cont
